@@ -11,6 +11,21 @@ the filtering ineffective.
 Ext.application({
 	launch:function(){
 
+		/*Ensures that the localStorage index contains only unique values*/
+		Ext.define('Tester.data.proxy.LocalStorage',{
+			override:'Ext.data.proxy.LocalStorage',
+			setIds:function(ids){
+				var obj = {};
+				var arr = [];
+				Ext.each(ids,function(id){
+					if(obj[id]){return false;}
+					obj[id]=true;
+					arr.push(id);
+				});
+				this.callParent([arr]);
+			}
+		});
+
 		/*Allows us to use the idProperty as documented. The data source (server, inline, etc.) must have a uniqueness constraint on the selected property.*/
 		Ext.define('Ext.data.identifier.Property', {
 			alias:'data.identifier.property',
@@ -104,6 +119,18 @@ Ext.application({
 					]
 				}
 			]
+		});
+		
+		/*Country store which contains a collection of Country models*/
+		Ext.create('Ext.data.Store',{
+			model:'Tester.model.Province',
+			storeId:'Province',
+			autoLoad:true,
+			autoSync:true,
+			proxy:{
+				id:'Province',
+				type:'localstorage'
+			}
 		});
 		
 		/*Displays the tester interface*/
