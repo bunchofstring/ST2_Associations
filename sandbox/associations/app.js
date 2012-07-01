@@ -121,7 +121,7 @@ Ext.application({
 			]
 		});
 		
-		/*Country store which contains a collection of Country models*/
+		/*Province store which contains the full collection of Province models, regardless of their parent Country*/
 		Ext.create('Ext.data.Store',{
 			model:'Tester.model.Province',
 			storeId:'Province',
