@@ -1,32 +1,82 @@
-/*
-CAVEATS:
-
-## autoLoad in hasMany store configurations
-In a hasMany store configuration, setting autoLoad to true will
-cause ALL of the foreign keys to be the same. I.e. Ontario's
-country_id will be US, when it should be CA. This also makes
-the filtering ineffective.
-*/
-
 Ext.application({
 	launch:function(){
-
-		/*Ensures that the localStorage index contains only unique values*/
+		
+		//From janelle: http://www.sencha.com/forum/showthread.php?220305-Problem-with-localstorage-store-and-model-with-hasMany-association&p=838096&viewfull=1#post838096
+		//Fixes the foreign key problem as well as the duplicate index values in localStorage. Badass.
 		Ext.define('Tester.data.proxy.LocalStorage',{
 			override:'Ext.data.proxy.LocalStorage',
-			setIds:function(ids){
-				var obj = {};
-				var arr = [];
-				Ext.each(ids,function(id){
-					if(obj[id]){return false;}
-					obj[id]=true;
-					arr.push(id);
-				});
-				this.callParent([arr]);
+			read: function(operation, callback, scope) {
+				var records    = [],
+					ids        = this.getIds(),
+					model      = this.getModel(),
+					idProperty = model.getIdProperty(),
+					params     = operation.getParams() || {},
+					length     = ids.length,
+					i, record, filters, tmpRecords = [];
+		
+				filters = operation.getFilters() || [];
+		
+				//read a single record
+				if (params[idProperty] !== undefined) {
+					record = this.getRecord(params[idProperty]);
+					if (record) {
+						tmpRecords.push(record);
+						//operation.setSuccessful();
+					}
+				} else {
+					for (i = 0; i < length; i++) {
+						tmpRecords.push(this.getRecord(ids[i]));
+						//operation.setSuccessful();
+					}
+				}
+				
+				// remove items that dont match filter
+				if(filters.length > 0)
+				{
+					for(i = 0; i < tmpRecords.length; i++)
+					{
+						var add = true;
+						
+						for(var x = 0; x < filters.length; x++)
+						{
+							if(tmpRecords[i].data[filters[x]._property] != filters[x]._value)
+							{
+								add = false;
+							}
+						}
+						
+						if(add)
+						{
+							records.push(tmpRecords[i]);
+						}
+					}
+				}
+				else
+				{
+					records = tmpRecords;
+				}
+				
+				if(records.length > 0)
+				{
+					operation.setSuccessful();
+				}
+		
+				operation.setCompleted();
+		
+				operation.setResultSet(Ext.create('Ext.data.ResultSet', {
+					records: records,
+					total  : records.length,
+					loaded : true
+				}));
+				operation.setRecords(records);
+		
+				if (typeof callback == 'function') {
+					callback.call(scope || this, operation);
+				}
 			}
 		});
 
-		/*Allows us to use the idProperty as documented. The data source (server, inline, etc.) must have a uniqueness constraint on the selected property.*/
+		//Allows us to use the idProperty as documented. The data source (server, inline, etc.) must have a uniqueness constraint on the selected property.
 		Ext.define('Ext.data.identifier.Property', {
 			alias:'data.identifier.property',
 			isUnique:true,
@@ -41,7 +91,7 @@ Ext.application({
 			}
 		});
 		
-		/*Country model definition*/
+		//Country model definition with a hasMany association store
 		Ext.define('Tester.model.Country',{
 			extend:'Ext.data.Model',
 			config:{
@@ -59,6 +109,7 @@ Ext.application({
 					associationKey:'provinces',
 					store:{
 						autoSync:true,
+						autoLoad:true,
 						proxy:{
 							id:'Province',
 							type:'localstorage',
@@ -68,6 +119,7 @@ Ext.application({
 			}
 		});
 		
+		//Province model definition
 		Ext.define('Tester.model.Province',{
 			extend:'Ext.data.Model',
 			config:{
@@ -83,7 +135,19 @@ Ext.application({
 			}
 		});
 		
-		/*Country store which contains a collection of Country models*/
+		//Province store which contains the full collection of Province models, regardless of their parent Country
+		Ext.create('Ext.data.Store',{
+			model:'Tester.model.Province',
+			storeId:'Province',
+			autoLoad:true,
+			autoSync:true,
+			proxy:{
+				id:'Province',
+				type:'localstorage'
+			}
+		});
+		
+		//Country store which contains a collection of Country models
 		Ext.create('Ext.data.Store',{
 			model:'Tester.model.Country',
 			storeId:'Country',
@@ -121,19 +185,7 @@ Ext.application({
 			]
 		});
 		
-		/*Province store which contains the full collection of Province models, regardless of their parent Country*/
-		Ext.create('Ext.data.Store',{
-			model:'Tester.model.Province',
-			storeId:'Province',
-			autoLoad:true,
-			autoSync:true,
-			proxy:{
-				id:'Province',
-				type:'localstorage'
-			}
-		});
-		
-		/*Displays the tester interface*/
+		//Displays the tester interface
 		Ext.Viewport.add({
 			xtype:'container',
 			scrollable:true,
@@ -176,15 +228,39 @@ Ext.application({
 			listeners:{
 				painted:function(container){
 					var addValidationResults = function(){
-					
+						
+						//Test 1: Verify that both the parent and child records are stored in localStorage
 						var associatedModelsInLocalStorage = (localStorage['Country-US'] && localStorage['Province-ON']) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
 						container.add({xtype:'container',margin:'0.5em 2em',html:'1. Associated Models in localStorage: '+associatedModelsInLocalStorage});
 						
-						var associatedLocalStorageIndexManaged = (localStorage['Province'].split(',').length == 3) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
+						//Test 1: Verify that both the parent and child records are stored in localStorage
+						Ext.getStore('Province').load();
+						var associatedLocalStorageIndexManaged = (localStorage['Province'].split(',').length == Ext.getStore('Province').getCount()) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
 						container.add({xtype:'container',margin:'0.5em 2em',html:'2. Managed Associated localStorage Index: '+associatedLocalStorageIndexManaged});
 						
-						var associatedStoreFiltered = (Ext.getStore('Country').getById('US').provinces().getCount() == 2) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
+						var usProvincesCount = Ext.getStore('Country').getById('CA').provinces().getCount();
+						var usProvincesCount2 = Ext.getStore('Province').queryBy(function(record){
+							return (record.get('country_id') == 'CA');
+						}).getCount();
+						var associatedStoreFiltered = (usProvincesCount == usProvincesCount2) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
 						container.add({xtype:'container',margin:'0.5em 2em',html:'3. Filter Associated Store: '+associatedStoreFiltered});
+						
+						//Here we add New York to the associated store and see if the overall store picks up the addition
+						var associatedProvinceStore = Ext.getStore('Country').getById('US').provinces();
+						var addRecordArtifact = associatedProvinceStore.getById('NY');
+						if(addRecordArtifact){
+							associatedProvinceStore.remove(addRecordArtifact);
+//Need to build this into the CRUD operations of associated stores. On updaterecord and on write don't work because the handlers don't trigger immediately. They seem to be asynchronous-like
+							Ext.getStore('Province').load();
+						}
+						Ext.getStore('Province').load();
+						var countBeforeAdd = Ext.getStore('Province').getCount();
+						associatedProvinceStore.add({abbreviation:'NY',name:'New York'});
+//Need to build this into the CRUD operations of associated stores. On updaterecord and on write don't work because the handlers don't trigger immediately. They seem to be asynchronous-like
+						Ext.getStore('Province').load();
+						var countAfterAdd = Ext.getStore('Province').getCount();
+						var associatedStoreAdditionsPropagate = (countAfterAdd == countBeforeAdd+1) ? '<span style=\'color:green\'>Passed</span>' : '<span style=\'color:red\'>Failed</span>';
+						container.add({xtype:'container',margin:'0.5em 2em',html:'4. Additions to Associated Stores Propagate: '+associatedStoreAdditionsPropagate});
 					};
 					
 					if(Ext.getStore('Country').isLoaded()){
